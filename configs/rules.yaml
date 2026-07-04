@@ -1,0 +1,109 @@
+rules:
+  - id: hardcoded-password
+    name: Hardcoded Password
+    severity: CRITICAL
+    description: "Detects hardcoded passwords in configuration files"
+    patterns:
+      - '(?i)(password|passwd|pwd)\s*[=:]\s*["\x27]?[^\s"\x27{}]{6,}'
+    file_patterns:
+      - '\.properties$'
+      - '\.xml$'
+      - '\.ya?ml$'
+      - '\.json$'
+      - '\.conf$'
+    enabled: true
+
+  - id: aws-secret-key
+    name: AWS Secret Key
+    severity: HIGH
+    description: "Detects AWS secret access keys"
+    patterns:
+      - '(?:A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}'
+    file_patterns:
+      - '\..+$'
+    enabled: true
+
+  - id: private-key
+    name: Private Key
+    severity: CRITICAL
+    description: "Detects PEM format private keys"
+    patterns:
+      - '-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----'
+    file_patterns:
+      - '\..+$'
+    enabled: true
+
+  - id: jdbc-credentials
+    name: JDBC Credentials
+    severity: HIGH
+    description: "Detects credentials in JDBC connection strings"
+    patterns:
+      - 'jdbc:[a-z]+://[^\s]+[?&](?:user|password)=[^\s&]+'
+    file_patterns:
+      - '\.properties$'
+      - '\.xml$'
+      - '\.ya?ml$'
+    enabled: true
+
+  - id: github-token
+    name: GitHub Token
+    severity: HIGH
+    description: "Detects GitHub personal access tokens"
+    patterns:
+      - 'gh[ps]_[A-Za-z0-9_]{36,255}'
+    file_patterns:
+      - '\..+$'
+    enabled: true
+
+  - id: generic-api-key
+    name: Generic API Key
+    severity: MEDIUM
+    description: "Detects generic API key patterns"
+    patterns:
+      - '(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[=:]\s*["\x27]?[A-Za-z0-9+/=]{20,}'
+    file_patterns:
+      - '\.properties$'
+      - '\.xml$'
+      - '\.ya?ml$'
+      - '\.json$'
+    enabled: true
+
+  # --- 演示高级字段（高级规则示例，可与内置规则 merge 叠加） ---
+  - id: my-company-token
+    name: My Company Internal Token
+    severity: HIGH
+    description: "Detects our internal service tokens"
+    engine: regex                # 默认即 regex，可省略
+    patterns:
+      - 'MYTOKEN-[A-Za-z0-9]{32}'
+    file_patterns:
+      - '\.properties$'
+      - '\.ya?ml$'
+    ignorecase: true             # 编译期加 (?i)
+    capture_group: 0             # 报告哪个分组作为 Match（0=整条）
+    allowlist:                   # 命中占位符则抑制，减误报
+      - 'MYTOKEN-TEST'
+      - 'example'
+    tags: [internal, token]
+    min_length: 16
+    enabled: true
+
+  # --- 熵引擎规则：检测无固定格式的高随机性密钥 ---
+  - id: my-high-entropy-secret
+    name: High Entropy Secret
+    severity: MEDIUM
+    engine: entropy
+    description: "Flag random-looking base64 strings that match no known format"
+    file_patterns:
+      - '\.properties$'
+      - '\.ya?ml$'
+      - '\.json$'
+      - '\.conf$'
+    entropy:
+      threshold: 4.5             # bits/char，≥4.5 视为可疑
+      window: 32                 # 滑动窗口长度
+      min_length: 24             # 忽略短于 24 字符的 token
+      charset: base64            # base64 | hex | ascii
+    allowlist: [example, test, changeme, your-]
+    tags: [entropy, generic]
+    enabled: true
