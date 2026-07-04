@@ -55,6 +55,15 @@ export default withMermaid(
             { text: '结果输出', link: '/guide/output' },
           ],
         },
+        {
+          text: '进阶',
+          items: [
+            { text: '常见问题排查', link: '/guide/troubleshooting' },
+            { text: '最佳实践', link: '/guide/best-practices' },
+            { text: '实测案例', link: '/guide/case-studies' },
+            { text: '常见问答', link: '/guide/faq' },
+          ],
+        },
       ],
       '/principle/': [
         {

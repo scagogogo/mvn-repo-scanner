@@ -81,6 +81,54 @@
 - `generic-api-key` — 通用 API Key 模式
 - `basic-auth-header` — HTTP Basic Auth Header
 - `bearer-token` — Bearer Token
+- `high-entropy-secret` — 高熵密钥（entropy 引擎）
+
+## 完整 38 条规则速查表
+
+| ID | 级别 | 名称 | 档位 |
+|----|------|------|------|
+| `hardcoded-password` | CRITICAL | Hardcoded Password | core |
+| `aws-secret-key` | HIGH | AWS Secret Key | core |
+| `private-key` | CRITICAL | Private Key | core |
+| `jdbc-credentials` | HIGH | JDBC Credentials | core |
+| `github-token` | HIGH | GitHub Token | core |
+| `generic-api-key` | MEDIUM | Generic API Key | core |
+| `google-api-key` | HIGH | Google API Key | extended |
+| `google-oauth` | HIGH | Google OAuth Access Token | extended |
+| `azure-storage-key` | HIGH | Azure Storage Account Key | extended |
+| `azure-tenant-secret` | HIGH | Azure Tenant Secret | extended |
+| `gcp-service-account` | CRITICAL | GCP Service Account Key | extended |
+| `digitalocean-token` | HIGH | DigitalOcean Token | extended |
+| `mongodb-connection` | HIGH | MongoDB Connection String | extended |
+| `mysql-connection` | HIGH | MySQL Connection String | extended |
+| `postgres-connection` | HIGH | PostgreSQL Connection String | extended |
+| `redis-connection` | MEDIUM | Redis Connection String | extended |
+| `sql-credential` | HIGH | SQL Credential in Config | extended |
+| `slack-token` | HIGH | Slack Token | extended |
+| `slack-webhook` | MEDIUM | Slack Webhook URL | extended |
+| `stripe-api-key` | CRITICAL | Stripe API Key | extended |
+| `sendgrid-api-key` | HIGH | SendGrid API Key | extended |
+| `mailgun-api-key` | HIGH | Mailgun API Key | extended |
+| `twilio-api-key` | HIGH | Twilio API Key | extended |
+| `square-access-token` | HIGH | Square Access Token | extended |
+| `npm-token` | HIGH | NPM Access Token | extended |
+| `ssh-private-key` | CRITICAL | SSH Private Key | extended |
+| `pgp-private-key` | CRITICAL | PGP Private Key Block | extended |
+| `jwt-secret` | HIGH | JWT Secret | extended |
+| `encryption-key` | HIGH | Encryption Key in Config | extended |
+| `basic-auth-header` | MEDIUM | Basic Auth Header | extended |
+| `bearer-token` | MEDIUM | Bearer Token | extended |
+| `oauth-client-secret` | HIGH | OAuth Client Secret | extended |
+| `high-entropy-secret` | MEDIUM | High Entropy Secret（熵引擎） | extended |
+| `maven-password-xml` | CRITICAL | Maven Settings Password | all |
+| `maven-passphrase` | HIGH | Maven GPG Passphrase | all |
+| `spring-credential` | HIGH | Spring Boot Credential | all |
+| `docker-registry-auth` | MEDIUM | Docker Registry Auth | all |
+| `firebase-key` | MEDIUM | Firebase API Key | all |
+
+::: tip 档位划分
+`core` = 6 条最高频低误报规则；`extended` 在 core 基础上加 26 条扩展规则（共 32）；`all` 在 extended 基础上加 6 条 Maven/Spring/Docker 等场景规则（共 38）。
+:::
 
 ## 查看完整规则列表
 

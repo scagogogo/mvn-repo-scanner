@@ -145,9 +145,34 @@ Maven 仓库（无论是公开的 Maven Central，还是企业内部的 Nexus / 
 
 - **自动遍历**整个仓库的 `groupId/artifactId/version/` 目录树
 - **解压 jar/war/ear**，扫描内部的 `.properties`、`.xml`、`.yml`、`.json` 等文本文件
-- **正则匹配** 37 类敏感信息模式，按 CRITICAL/HIGH/MEDIUM/LOW 分级
+- **正则 + 熵双引擎**匹配 38 类敏感信息模式，按 CRITICAL/HIGH/MEDIUM/LOW 分级
 - **断点续扫**，扫到一半中断了，下次从断点继续，不重扫不漏扫
 - **定时调度**，周期性监控仓库新发布的 artifact
+
+## 🔬 真实扫描效果
+
+用一个含三类泄露的测试 jar 验证（硬编码密码、高熵密钥、GitHub Token），三种引擎同时命中：
+
+```text
+  CRITICAL [hardcoded-password] Hardcoded Password
+    Artifact: com.example:leaky-lib:1.0
+    File:     META-INF/application.properties:1
+    Match:    password=HardcodedPassword123!
+
+  MEDIUM   [high-entropy-secret] High Entropy Secret
+    Artifact: com.example:leaky-lib:1.0
+    File:     META-INF/application.properties:2
+    Match:    wJalrXUtnFEMI/K7MDENG/bPxRfiCYEX
+
+  HIGH     [github-token] GitHub Token
+    Artifact: com.example:leaky-lib:1.0
+    File:     META-INF/application.properties:3
+    Match:    ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+::: tip Maven Central 实测说明
+Maven Central 是规范化发布的公共仓库，jar 包内极少包含敏感信息（多为纯 `.class` 编译产物）。工具已对 `javax.inject`、`com.typesafe.config`、`io.jsonwebtoken`、`com.zaxxer` 等 groupId 实测验证扫描能力正常。要扫出真实泄露，建议扫描**企业私服**或**快照仓库**。详见[实测案例](/guide/case-studies)。
+:::
 
 ## 它是如何解决的？
 

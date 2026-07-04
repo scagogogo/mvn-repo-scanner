@@ -68,6 +68,31 @@ Scan Summary:
 
 `Findings: 0` 表示这个 groupId 下没有检测到敏感内容泄露。
 
+::: tip 为什么是 0？
+Maven Central 是规范发布的公共仓库，jar 包内极少包含敏感信息。这不代表工具失效——下一节用测试 jar 验证检测能力。详见[常见问题排查](./troubleshooting)。
+:::
+
+## 2.5 验证检测能力（可选）
+
+用一个含泄露的测试 jar 确认工具能正常检测：
+
+```bash
+# 创建测试仓库
+mkdir -p /tmp/test-repo/com/example/leaky/1.0
+echo 'password=HardcodedPassword123!' > /tmp/app.properties
+cd /tmp/test-repo/com/example/leaky/1.0
+zip leaky-1.0.jar /tmp/app.properties
+echo '<?xml version="1.0"?><project><groupId>com.example</groupId><artifactId>leaky</artifactId><version>1.0</version></project>' > leaky-1.0.pom
+
+# 启动本地仓库
+cd /tmp/test-repo && python3 -m http.server 8099 &
+
+# 扫描
+./mvn-repo-scanner scan --repo http://localhost:8099 --group com.example --rules-level core
+```
+
+预期会扫出 `CRITICAL [hardcoded-password]`。详见[实测案例](./case-studies)。
+
 ## 3. 扫描更大的范围
 
 扫描 `com.example` 组，启用更多规则，并发 5：
