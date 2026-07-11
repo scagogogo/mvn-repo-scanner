@@ -107,3 +107,40 @@ func TestLoadScanState_FutureVersion(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "version")
 }
+
+// ScanFinished 状态：MarkFinishedStatus 设置后 GetStatus 返回 finished，
+// 且持久化 round-trip 后仍为 finished。
+func TestScanStatus_Finished_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.json")
+	s := NewScanStateWithConfig("fin1", "https://a.com", "", path, 0,
+		ConfigSnapshot{RepoURL: "https://a.com", MaxFileSize: "50MB"})
+	s.MarkFinishedStatus()
+	require.Equal(t, ScanFinished, s.GetStatus())
+	require.NoError(t, s.Flush())
+
+	loaded, err := LoadScanState(path)
+	require.NoError(t, err)
+	assert.Equal(t, ScanFinished, loaded.GetStatus())
+}
+
+// GetResumeEstimate 聚合各计数。
+// 用 checkpointEvery=1000 抑制 MarkCompleted/MarkFailed 的自动 flush，
+// 让断言聚焦于 estimate 聚合而非落盘副作用。
+func TestGetResumeEstimate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.json")
+	s := NewScanStateWithConfig("est1", "https://a.com", "", path, 1000,
+		ConfigSnapshot{RepoURL: "https://a.com", MaxFileSize: "50MB"})
+	s.SetDiscoveredArtifacts([]string{"a/1", "a/2", "a/3"}) // TotalDiscovered=3
+	require.NoError(t, s.MarkCompleted("a/1"))              // TotalScanned=1
+	require.NoError(t, s.MarkFailed("a/2", "boom", 0))     // TotalFailed=1
+	s.MarkInFlight("a/3")                                  // inFlight=1
+
+	status, disc, scanned, failed, inFlight := s.GetResumeEstimate()
+	assert.Equal(t, ScanRunning, status)
+	assert.Equal(t, 3, disc)
+	assert.Equal(t, 1, scanned)
+	assert.Equal(t, 1, failed)
+	assert.Equal(t, 1, inFlight)
+}

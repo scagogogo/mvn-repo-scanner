@@ -25,8 +25,9 @@ type ScanStatus string
 
 const (
 	ScanRunning     ScanStatus = "running"
-	ScanCompleted   ScanStatus = "completed"
-	ScanInterrupted ScanStatus = "interrupted"
+	ScanCompleted   ScanStatus = "completed"   // scan ran to full completion
+	ScanInterrupted ScanStatus = "interrupted" // aborted by signal/error
+	ScanFinished    ScanStatus = "finished"    // stopped normally before completion (e.g. limit reached); safe to resume
 )
 
 // ConfigSnapshot captures critical config at scan creation time for resume validation.
@@ -336,6 +337,16 @@ func (s *ScanState) MarkCompletedStatus() {
 	s.Status = ScanCompleted
 }
 
+// MarkFinishedStatus sets the scan status to finished — the scan was stopped
+// normally before reaching full completion (e.g. a scan-count limit was hit),
+// so it is safe to resume later. Distinct from Interrupted (signal/error) and
+// Completed (ran to the end).
+func (s *ScanState) MarkFinishedStatus() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Status = ScanFinished
+}
+
 // GetStatus returns the current scan status.
 func (s *ScanState) GetStatus() ScanStatus {
 	s.mu.RLock()
@@ -602,6 +613,15 @@ func (s *ScanState) GetProgressStats() (discovered, scanned, failed int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.TotalDiscovered, s.TotalScanned, s.TotalFailed
+}
+
+// GetResumeEstimate returns a coarse progress snapshot for resume logging:
+// status, discovered (cached total), scanned, failed, and in-flight counts.
+// Used by cmd to print a resume progress line without exposing internal slices.
+func (s *ScanState) GetResumeEstimate() (status ScanStatus, discovered, scanned, failed, inFlight int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Status, s.TotalDiscovered, s.TotalScanned, s.TotalFailed, len(s.InFlightPaths)
 }
 
 // flush writes the current state to disk atomically (caller must hold lock).
