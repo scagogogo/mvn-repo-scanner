@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -129,6 +130,9 @@ func NewScanStateWithConfig(scanID, repoURL, groupFilter, filePath string, check
 }
 
 // LoadScanState loads scan state from a file. Returns nil if file doesn't exist.
+// If the primary file is corrupt (unparseable), it falls back to the .bak
+// backup written by the previous successful flush, so a single bad write
+// never loses all resume progress.
 func LoadScanState(filePath string) (*ScanState, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -138,6 +142,29 @@ func LoadScanState(filePath string) (*ScanState, error) {
 		return nil, fmt.Errorf("read state file: %w", err)
 	}
 
+	loaded, perr := parseAndFinalize(data, filePath)
+	if perr == nil {
+		return loaded, nil
+	}
+
+	// Primary file is corrupt — try the .bak backup before giving up.
+	bak, bakErr := os.ReadFile(filePath + ".bak")
+	if bakErr != nil {
+		return nil, perr // no backup, surface the original parse error
+	}
+	bakLoaded, bakParseErr := parseAndFinalize(bak, filePath)
+	if bakParseErr != nil {
+		return nil, perr // backup also bad — surface the primary error
+	}
+	log.Printf("Warning: state file %s corrupt (%v), recovered from .bak backup", filePath, perr)
+	return bakLoaded, nil
+}
+
+// parseAndFinalize unmarshals one state blob, runs version check + migration,
+// and rebuilds the in-memory lookup sets. Shared by the primary and .bak
+// recovery paths. Returns (nil, parse/version err) on failure so LoadScanState
+// can decide whether to fall back to .bak.
+func parseAndFinalize(data []byte, filePath string) (*ScanState, error) {
 	var s ScanState
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("parse state file: %w", err)
@@ -578,6 +605,14 @@ func (s *ScanState) GetProgressStats() (discovered, scanned, failed int) {
 }
 
 // flush writes the current state to disk atomically (caller must hold lock).
+//
+// Persistence hardening:
+//   1. Write to a .tmp file, then fsync it so the bytes survive a crash
+//      before the rename commits them. (Without fsync, a rename can land
+//      while the data is still only in the kernel page cache — a power
+//      loss yields a truncated/empty state file.)
+//   2. Before overwriting, copy the previous good file to .bak so a corrupt
+//      write or future parse failure can fall back to it in LoadScanState.
 func (s *ScanState) flush() error {
 	s.LastUpdated = time.Now().Format(time.RFC3339)
 	s.dirtyCount = 0
@@ -591,6 +626,17 @@ func (s *ScanState) flush() error {
 	tmpFile := s.filePath + ".tmp"
 	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
 		return fmt.Errorf("write temp: %w", err)
+	}
+
+	// fsync the temp file so the committed bytes are durable on disk.
+	if f, err := os.Open(tmpFile); err == nil {
+		_ = f.Sync() // best-effort; some filesystems/OSes ignore fsync errors
+		f.Close()
+	}
+
+	// Back up the previous good state file (if any) before replacing it.
+	if prev, err := os.ReadFile(s.filePath); err == nil && len(prev) > 0 {
+		_ = os.WriteFile(s.filePath+".bak", prev, 0644)
 	}
 
 	if err := os.Rename(tmpFile, s.filePath); err != nil {
