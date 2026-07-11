@@ -56,3 +56,27 @@ func TestValidateConfig_BranchCombos(t *testing.T) {
 		assert.NoError(t, s.ValidateConfig(ConfigSnapshot{RepoURL: "https://a.com", RulesLevel: "extended"}))
 	})
 }
+
+// state.go ValidateConfig 的 MaxFileSize 复合条件
+// `MaxFileSize != "" && MaxFileSize != cfg.MaxFileSize`
+// 覆盖：空快照短路通过、相同值通过、不同值报错。
+func TestValidateConfig_MaxFileSize_BranchCombos(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 空快照（MaxFileSize==""）→ 短路通过，即使 cfg 不同
+	s1 := NewScanStateWithConfig("mf1", "https://a.com", "", filepath.Join(tmpDir, "mf1.json"), 0,
+		ConfigSnapshot{RepoURL: "https://a.com"}) // MaxFileSize 空
+	assert.NoError(t, s1.ValidateConfig(ConfigSnapshot{RepoURL: "https://a.com", MaxFileSize: "100MB"}))
+
+	// 相同值 → 通过
+	s2 := NewScanStateWithConfig("mf2", "https://a.com", "", filepath.Join(tmpDir, "mf2.json"), 0,
+		ConfigSnapshot{RepoURL: "https://a.com", MaxFileSize: "50MB"})
+	assert.NoError(t, s2.ValidateConfig(ConfigSnapshot{RepoURL: "https://a.com", MaxFileSize: "50MB"}))
+
+	// 不同值 → 报错，且错误消息含 MaxFileSize
+	s3 := NewScanStateWithConfig("mf3", "https://a.com", "", filepath.Join(tmpDir, "mf3.json"), 0,
+		ConfigSnapshot{RepoURL: "https://a.com", MaxFileSize: "50MB"})
+	err := s3.ValidateConfig(ConfigSnapshot{RepoURL: "https://a.com", MaxFileSize: "100MB"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MaxFileSize")
+}

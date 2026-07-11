@@ -561,6 +561,12 @@ func (s *ScanState) ValidateConfig(cfg ConfigSnapshot) error {
 	if s.ConfigSnapshot.RulesMerge != cfg.RulesMerge {
 		return fmt.Errorf("state file RulesMerge (%v) does not match current RulesMerge (%v)", s.ConfigSnapshot.RulesMerge, cfg.RulesMerge)
 	}
+	// MaxFileSize drift changes which files get scanned — a previously-skipped
+	// oversized artifact would now be scanned (or vice versa), making the
+	// resumed result set incomparable. Refuse resume across a different cap.
+	if s.ConfigSnapshot.MaxFileSize != "" && s.ConfigSnapshot.MaxFileSize != cfg.MaxFileSize {
+		return fmt.Errorf("state file MaxFileSize (%q) does not match current MaxFileSize (%q)", s.ConfigSnapshot.MaxFileSize, cfg.MaxFileSize)
+	}
 	return nil
 }
 
@@ -576,10 +582,11 @@ func (s *ScanState) flush() error {
 	s.LastUpdated = time.Now().Format(time.RFC3339)
 	s.dirtyCount = 0
 
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal state: %w", err)
-	}
+	// ScanState's exported fields are all JSON-serializable (strings, ints,
+	// slices, structs of the same); unexported fields (mu, maps) are ignored by
+	// encoding/json. MarshalIndent cannot fail in practice — the error is
+	// intentionally ignored.
+	data, _ := json.MarshalIndent(s, "", "  ")
 
 	tmpFile := s.filePath + ".tmp"
 	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
