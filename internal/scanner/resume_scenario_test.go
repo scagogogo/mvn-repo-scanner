@@ -59,6 +59,10 @@ func (h *resumeScenarioHarness) runPhaseBlocking(t *testing.T, n int, blockPath 
 		WithState(h.state), WithDiscoveryCacher(h.state),
 		WithFailedRetryer(h.state), WithCursorSaver(h.state),
 		WithPageFetcher(h.fetcher), WithStreamingDiscovery(),
+		// WithRetryFailed(1) 让被前一 phase 阻塞导致 failed 的 artifact 在本 phase 被重试。
+		// selectiveBlockDownloader 在 ctx cancel 后返回 err 让阻塞的 artifact 标 failed
+		// (而非保持 in-flight)，下一 phase 用 retry-failed 机制重扫它，模拟真实 --retry-failed resume。
+		WithRetryFailed(1),
 	)
 	var scanned []string
 	var mu sync.Mutex
@@ -94,6 +98,7 @@ func (h *resumeScenarioHarness) runPhaseToCompletion(t *testing.T) []string {
 		WithState(h.state), WithDiscoveryCacher(h.state),
 		WithFailedRetryer(h.state), WithCursorSaver(h.state),
 		WithPageFetcher(h.fetcher), WithStreamingDiscovery(),
+		WithRetryFailed(1), // 重试前序 phase 阻塞导致 failed 的 artifact
 	)
 	var scanned []string
 	var mu sync.Mutex
@@ -234,6 +239,7 @@ func TestResumeScenario_ConcurrentCancelPoint(t *testing.T) {
 		WithState(st), WithDiscoveryCacher(st),
 		WithFailedRetryer(st), WithCursorSaver(st),
 		WithPageFetcher(fetcher), WithStreamingDiscovery(),
+		WithRetryFailed(1), // 重试 phase1 阻塞导致 failed 的 commons/1.0
 	)
 	var p2 []string
 	var mu2 sync.Mutex
