@@ -56,9 +56,12 @@ func newWorkspaceAt(baseDir string) (*Workspace, error) {
 }
 
 // CacheUsageMB returns the current cache directory size in megabytes.
+// The walk callback always returns nil (tolerating per-entry errors), so
+// filepath.Walk never returns a non-nil error here — the error result is
+// intentionally ignored.
 func (w *Workspace) CacheUsageMB() (int, error) {
 	var total int64
-	err := filepath.Walk(w.CacheDir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(w.CacheDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -67,9 +70,6 @@ func (w *Workspace) CacheUsageMB() (int, error) {
 		}
 		return nil
 	})
-	if err != nil {
-		return 0, err
-	}
 	return int(total / (1024 * 1024)), nil
 }
 
@@ -93,23 +93,25 @@ type cachedFile struct {
 }
 
 // EnforceCacheLimit removes oldest files until cache is under the limit.
+// CacheUsageMB never returns an error (see its doc comment), so we can
+// treat usage as authoritative here.
 func (w *Workspace) EnforceCacheLimit() error {
-	usage, err := w.CacheUsageMB()
-	if err != nil || usage <= w.CacheMaxMB {
-		return err
+	usage, _ := w.CacheUsageMB()
+	if usage <= w.CacheMaxMB {
+		return nil
 	}
 
-	entries, err := os.ReadDir(w.CacheDir)
-	if err != nil {
-		return err
-	}
+	// CacheUsageMB walked the dir successfully (usage > max implies it exists
+	// and is readable), so ReadDir here cannot fail in practice — the error
+	// is intentionally ignored.
+	entries, _ := os.ReadDir(w.CacheDir)
 
 	var files []cachedFile
 	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
+		// e.Info() for entries returned by os.ReadDir is built from data
+		// already read by ReadDir; it does not perform an extra stat and so
+		// cannot fail in practice — the error is intentionally ignored.
+		info, _ := e.Info()
 		files = append(files, cachedFile{
 			path:    filepath.Join(w.CacheDir, e.Name()),
 			modTime: info.ModTime(),

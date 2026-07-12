@@ -178,3 +178,43 @@ func TestDiskWatcher_Budget(t *testing.T) {
 	dw := NewDiskWatcher(42)
 	assert.Equal(t, int64(42), dw.Budget())
 }
+
+func TestDiskWatcher_Update_UnlimitedBudget(t *testing.T) {
+	// budget<=0 → Update 直接返回，不修改 current
+	dw := NewDiskWatcher(0)
+	dw.Update(100, 200)
+	assert.Equal(t, int64(0), dw.Current(), "unlimited budget → Update no-op")
+}
+
+func TestDiskWatcher_Update_NegativeClamped(t *testing.T) {
+	// oldSize > 当前 current → current 变负 → 钳为 0
+	dw := NewDiskWatcher(100 * 1024 * 1024)
+	dw.Acquire(context.Background(), 1*1024*1024) // current=1MB
+	// Update 释放 5MB（比 current 大）→ current=-4MB → 钳为 0
+	dw.Update(5*1024*1024, 0)
+	assert.Equal(t, int64(0), dw.Current())
+}
+
+func TestDiskWatcher_Release_MoreThanCurrent(t *testing.T) {
+	// Release 量 > current → current 变负 → 钳为 0（line 87-89）
+	dw := NewDiskWatcher(10 * 1024 * 1024) // 10MB budget
+	dw.Acquire(context.Background(), 1*1024*1024) // current=1MB
+	// Release 5MB（比 current 1MB 大）→ current=-4MB → 钳为 0
+	dw.Release(5 * 1024 * 1024)
+	assert.Equal(t, int64(0), dw.Current())
+}
+
+func TestDiskWatcher_Release_NotifyBufferFull(t *testing.T) {
+	// Release 的 select 在 notify channel 满（64 个未消费信号）时走 default 分支
+	// （line 97）。注释说正常负载下不会发生（Acquire 会消费），这里手动灌满
+	// notify 触发 default，验证安全降级（不阻塞、不 panic）。
+	dw := NewDiskWatcher(10 * 1024 * 1024)
+	dw.Acquire(context.Background(), 1*1024*1024)
+	// 灌满 notify（64 slots），无 Acquire 在等 → 信号堆积
+	for i := 0; i < 64; i++ {
+		dw.notify <- struct{}{}
+	}
+	// 再 Release → select 走 default（97）而非 case（96）
+	dw.Release(1 * 1024 * 1024)
+	assert.Equal(t, int64(0), dw.Current())
+}

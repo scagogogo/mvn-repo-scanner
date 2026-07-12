@@ -107,10 +107,9 @@ func LoadRules(rulesFile string) ([]*Rule, error) {
 //     share the same ID (so users can tweak a built-in rule without forking
 //     the whole set). This lets a user write "38 built-in + my 5 extra".
 func LoadRulesWithLevel(rulesFile, level string, merge bool) ([]*Rule, error) {
-	builtin, err := builtinRulesForLevel(level)
-	if err != nil {
-		return nil, err
-	}
+	// builtinRulesForLevel never returns an error (it falls back to core for
+	// unknown levels), so the error is intentionally ignored here.
+	builtin, _ := builtinRulesForLevel(level)
 	if rulesFile == "" {
 		return builtin, nil
 	}

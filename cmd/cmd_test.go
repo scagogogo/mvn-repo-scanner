@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scagogogo/mvn-repo-scanner/internal/config"
+	"github.com/scagogogo/mvn-repo-scanner/internal/detector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -109,10 +111,15 @@ func TestScanCmd_Help(t *testing.T) {
 }
 
 func TestGetConfig(t *testing.T) {
-	cfg := GetConfig()
-	require.NotNil(t, cfg)
-	assert.Equal(t, 10, cfg.Concurrency)
-	assert.Equal(t, "core", cfg.RulesLevel)
+	// GetConfig 返回包级 cfg，其初值由 init() 设为 DefaultConfig()。其他测试可能
+	// 修改全局 cfg，所以这里只验证 GetConfig 返回非 nil 且与当前 cfg 同一对象，
+	// 默认值由 config.DefaultConfig() 直接断言（不依赖全局状态）。
+	c := GetConfig()
+	require.NotNil(t, c)
+	assert.Same(t, cfg, c)
+	def := config.DefaultConfig()
+	assert.Equal(t, 10, def.Concurrency)
+	assert.Equal(t, "core", def.RulesLevel)
 }
 
 func TestScanCmd_HelpShowsFlags(t *testing.T) {
@@ -126,4 +133,63 @@ func TestScanCmd_HelpShowsFlags(t *testing.T) {
 	output := buf.String()
 	assert.True(t, strings.Contains(output, "--repo") || strings.Contains(output, "scan"),
 		"scan help should mention repo or scan")
+}
+
+// Execute() 的 nil 路径：rootCmd.Execute() 成功（--help）→ 不走 err 块。
+func TestExecute_NoError(t *testing.T) {
+	rootCmd.SetArgs([]string{"--help"})
+	rootCmd.SetOut(io.Discard)
+	rootCmd.SetErr(io.Discard)
+	// osExit 保持 os.Exit，但 nil 路径不调它
+	Execute()
+}
+
+// Execute() 的 err 路径（line 21-24）：未知命令 → rootCmd.Execute() 返回 err →
+// fmt.Fprintln + osExit(1)。替换 osExit 避免真正退出进程。
+func TestExecute_ErrorPath(t *testing.T) {
+	// 捕获 stderr
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// 替换 osExit 避免终止测试进程
+	called := false
+	savedExit := osExit
+	osExit = func(code int) { called = true; _ = code }
+	defer func() { osExit = savedExit }()
+
+	rootCmd.SetArgs([]string{"unknown-command-xyz"})
+	rootCmd.SetOut(io.Discard)
+	rootCmd.SetErr(io.Discard)
+	Execute()
+
+	w.Close()
+	os.Stderr = oldStderr
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	r.Close()
+
+	assert.True(t, called, "osExit should be called on rootCmd error")
+	assert.Contains(t, buf.String(), "unknown-command-xyz")
+}
+
+// runRules 的 disabled rule 分支（line 44-46）：注入 rulesForLevelFn 返回含
+// 一条 disabled 规则的列表（内置规则全 enabled，分支否则不可达）。
+func TestRulesCmd_DisabledRule(t *testing.T) {
+	saved := rulesForLevelFn
+	rulesForLevelFn = func(level string) []*detector.Rule {
+		return []*detector.Rule{
+			{ID: "on-rule", Name: "On Rule", Severity: detector.SeverityHigh, Enabled: true},
+			{ID: "off-rule", Name: "Off Rule", Severity: detector.SeverityMedium, Enabled: false},
+		}
+	}
+	t.Cleanup(func() { rulesForLevelFn = saved })
+
+	output := captureStdout(func() {
+		rootCmd.SetArgs([]string{"rules", "-l", "core"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+	assert.Contains(t, output, "disabled")
+	assert.Contains(t, output, "off-rule")
 }

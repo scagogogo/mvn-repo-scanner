@@ -69,12 +69,23 @@ func init() {
 }
 
 // openTaskStore opens the workspace SQLite store for task management.
+// openTaskStoreFn is openTaskStore indirected as a package-level variable so
+// tests can inject a failing store to cover the error-return branches of the
+// runTask* commands (which otherwise always get a healthy store).
+var openTaskStoreFn = openTaskStore
+
+// openStoreFn indirects storage.OpenStore so tests can inject a store-open
+// failure to cover the "open database" error-return branches of runScan,
+// runHistory, and openTaskStore (which otherwise cannot fail on a workspace
+// file path). It does not change production behavior.
+var openStoreFn = storage.OpenStore
+
 func openTaskStore() (*storage.Store, error) {
 	ws, err := storage.NewWorkspace()
 	if err != nil {
 		return nil, fmt.Errorf("init workspace: %w", err)
 	}
-	store, err := storage.OpenStore(ws.DBPath)
+	store, err := openStoreFn(ws.DBPath)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -82,7 +93,7 @@ func openTaskStore() (*storage.Store, error) {
 }
 
 func runTaskList(cmd *cobra.Command, args []string) error {
-	store, err := openTaskStore()
+	store, err := openTaskStoreFn()
 	if err != nil {
 		return err
 	}
@@ -115,7 +126,7 @@ func runTaskList(cmd *cobra.Command, args []string) error {
 }
 
 func runTaskShow(cmd *cobra.Command, args []string) error {
-	store, err := openTaskStore()
+	store, err := openTaskStoreFn()
 	if err != nil {
 		return err
 	}
@@ -151,7 +162,7 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 }
 
 func runTaskPause(cmd *cobra.Command, args []string) error {
-	store, err := openTaskStore()
+	store, err := openTaskStoreFn()
 	if err != nil {
 		return err
 	}
@@ -165,7 +176,7 @@ func runTaskPause(cmd *cobra.Command, args []string) error {
 }
 
 func runTaskResume(cmd *cobra.Command, args []string) error {
-	store, err := openTaskStore()
+	store, err := openTaskStoreFn()
 	if err != nil {
 		return err
 	}
@@ -179,7 +190,7 @@ func runTaskResume(cmd *cobra.Command, args []string) error {
 }
 
 func runTaskDelete(cmd *cobra.Command, args []string) error {
-	store, err := openTaskStore()
+	store, err := openTaskStoreFn()
 	if err != nil {
 		return err
 	}
@@ -197,7 +208,7 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 // whose next_run_at has passed. Each due task runs a scan with its persisted
 // config and resume state.
 func runTaskRun(cmd *cobra.Command, args []string) error {
-	store, err := openTaskStore()
+	store, err := openTaskStoreFn()
 	if err != nil {
 		return err
 	}

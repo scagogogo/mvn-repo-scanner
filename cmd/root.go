@@ -11,6 +11,11 @@ import (
 
 var cfg *config.Config
 
+// osExit is os.Exit, but indirected as a package-level variable so tests can
+// replace it (os.Exit itself cannot be mocked). Execute is the process entry
+// point; the exit-on-error path is exercised by swapping this out.
+var osExit = os.Exit
+
 var rootCmd = &cobra.Command{
 	Use:   "mvn-repo-scanner",
 	Short: "Maven repository sensitive content scanner",
@@ -20,7 +25,7 @@ var rootCmd = &cobra.Command{
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		osExit(1)
 	}
 }
 

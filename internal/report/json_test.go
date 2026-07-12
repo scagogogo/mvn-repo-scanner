@@ -71,3 +71,20 @@ func TestJSONReporter_ReportStructure(t *testing.T) {
 	assert.Equal(t, "com.test", r.Config.GroupFilter)
 	assert.NotNil(t, r.Findings)
 }
+
+func TestJSONReporter_WriteToEmptyPath_PrintsToStdout(t *testing.T) {
+	// outputFile="" → 走 stdout 分支（Println），不报错
+	r := NewReport("scan-empty", "https://repo.example.com", "", 1)
+	r.Summary = scanner.NewSummary()
+	jr := NewJSONReporter("", r) // 空字符串
+	require.NoError(t, jr.Write())
+}
+
+func TestJSONReporter_WriteToFile_BadDir(t *testing.T) {
+	// outputFile 指向不存在的目录 → os.WriteFile 失败分支
+	r := NewReport("scan-baddir", "https://repo.example.com", "", 1)
+	r.Summary = scanner.NewSummary()
+	jr := NewJSONReporter("/nonexistent/dir/report.json", r)
+	err := jr.Write()
+	assert.Error(t, err)
+}

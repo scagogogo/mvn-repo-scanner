@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -175,4 +176,54 @@ func TestConfig_ParseMaxFileSize_NoSuffix(t *testing.T) {
 	size, err := cfg.ParseMaxFileSize()
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), size)
+}
+
+func TestConfig_Validate_BadRepoURLScheme(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.RepoURL = "ftp://example.com"
+	assert.Error(t, cfg.Validate())
+}
+
+func TestConfig_Validate_NegativeQPS(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.QPS = -1
+	assert.Error(t, cfg.Validate())
+}
+
+func TestConfig_Validate_NegativeScanConcurrency(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.ScanConcurrency = -1
+	assert.Error(t, cfg.Validate())
+}
+
+func TestConfig_ParseMaxFileSize_GB_ToBytes(t *testing.T) {
+	cfg := &Config{MaxFileSize: "1GB"}
+	size, err := cfg.ParseMaxFileSize()
+	require.NoError(t, err)
+	assert.Equal(t, int64(1024*1024*1024), size)
+}
+
+func TestConfig_ParseMaxFileSize_BadNumberWithSuffix(t *testing.T) {
+	// 合法后缀但数字部分非法 → strconv.ParseInt 失败分支
+	cfg := &Config{MaxFileSize: "xMB"}
+	size, err := cfg.ParseMaxFileSize()
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), size)
+	assert.Contains(t, err.Error(), "invalid max file size")
+}
+
+func TestConfig_ParseMaxFileSize_LowerCaseSuffix(t *testing.T) {
+	// 小写后缀 → ToUpper 后应正常解析
+	cfg := &Config{MaxFileSize: "5mb"}
+	size, err := cfg.ParseMaxFileSize()
+	require.NoError(t, err)
+	assert.Equal(t, int64(5*1024*1024), size)
+}
+
+func TestConfig_ParseMaxFileSize_Whitespace(t *testing.T) {
+	// 前后空格 → TrimSpace 后正常解析
+	cfg := &Config{MaxFileSize: "  10MB  "}
+	size, err := cfg.ParseMaxFileSize()
+	require.NoError(t, err)
+	assert.Equal(t, int64(10*1024*1024), size)
 }

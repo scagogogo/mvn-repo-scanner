@@ -484,3 +484,167 @@ func TestScanState_SetMaxRetries(t *testing.T) {
 	s.SetMaxRetries(5)
 	assert.Equal(t, 5, s.MaxRetries)
 }
+
+// ---- DiscoveryCursor 系列 ----
+
+func TestScanState_DiscoveryCursor(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile := filepath.Join(tmpDir, "state.json")
+	s := NewScanStateWithCheckpoint("scan-cur", "https://x", "", stateFile, 0)
+
+	// 初始无 cursor
+	assert.False(t, s.HasDiscoveryCursor())
+	assert.Nil(t, s.GetDiscoveryCursor())
+
+	// 设置 cursor
+	cursor := []CursorFrameJSON{{DirPath: "com", NextIdx: 1}, {DirPath: "com/example", NextIdx: 0}}
+	s.SetDiscoveryCursor(cursor)
+	assert.True(t, s.HasDiscoveryCursor())
+
+	got := s.GetDiscoveryCursor()
+	require.Len(t, got, 2)
+	assert.Equal(t, "com", got[0].DirPath)
+	assert.Equal(t, 1, got[0].NextIdx)
+
+	// 修改返回的 slice 不应影响内部状态
+	got[0].NextIdx = 99
+	assert.Equal(t, 1, s.GetDiscoveryCursor()[0].NextIdx)
+
+	// 清除
+	s.ClearDiscoveryCursor()
+	assert.False(t, s.HasDiscoveryCursor())
+	assert.Nil(t, s.GetDiscoveryCursor())
+}
+
+func TestScanState_SetDiscoveryCursor_CheckpointEvery(t *testing.T) {
+	// checkpointEvery=2 → 第二次 SetDiscoveryCursor 触发 flush
+	tmpDir := t.TempDir()
+	stateFile := filepath.Join(tmpDir, "state.json")
+	s := NewScanStateWithCheckpoint("scan-cur-cp", "https://x", "", stateFile, 2)
+
+	s.SetDiscoveryCursor([]CursorFrameJSON{{DirPath: "a"}}) // dirtyCount=1，不 flush
+	s.SetDiscoveryCursor([]CursorFrameJSON{{DirPath: "b"}}) // dirtyCount=2，触发 flush
+
+	// 重新加载应能读到 cursor
+	loaded, err := LoadScanState(stateFile)
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.True(t, loaded.HasDiscoveryCursor())
+	assert.Equal(t, "b", loaded.GetDiscoveryCursor()[0].DirPath)
+}
+
+// ---- GetInFlightPaths ----
+
+func TestScanState_GetInFlightPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile := filepath.Join(tmpDir, "state.json")
+	s := NewScanStateWithCheckpoint("scan-if", "https://x", "", stateFile, 0)
+
+	s.MarkInFlight("com/a/1")
+	s.MarkInFlight("com/b/2")
+
+	paths := s.GetInFlightPaths()
+	assert.ElementsMatch(t, []string{"com/a/1", "com/b/2"}, paths)
+
+	// 修改返回 slice 不影响内部
+	paths[0] = "mutated"
+	assert.Contains(t, s.GetInFlightPaths(), "com/a/1")
+}
+
+// ---- ValidateConfig 剩余分支 ----
+
+func TestScanState_ValidateConfig_RulesLevelMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile := filepath.Join(tmpDir, "state.json")
+	cfg := ConfigSnapshot{RepoURL: "https://x", GroupFilter: "g", RulesLevel: "core"}
+	s := NewScanStateWithConfig("s", "https://x", "g", stateFile, 0, cfg)
+
+	err := s.ValidateConfig(ConfigSnapshot{RepoURL: "https://x", GroupFilter: "g", RulesLevel: "extended"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "RulesLevel")
+}
+
+func TestScanState_ValidateConfig_RulesFileMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile := filepath.Join(tmpDir, "state.json")
+	cfg := ConfigSnapshot{RepoURL: "https://x", RulesFile: "/path/a.yaml"}
+	s := NewScanStateWithConfig("s", "https://x", "", stateFile, 0, cfg)
+
+	err := s.ValidateConfig(ConfigSnapshot{RepoURL: "https://x", RulesFile: "/path/b.yaml"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "RulesFile")
+}
+
+func TestScanState_ValidateConfig_RulesMergeMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile := filepath.Join(tmpDir, "state.json")
+	cfg := ConfigSnapshot{RepoURL: "https://x", RulesMerge: false}
+	s := NewScanStateWithConfig("s", "https://x", "", stateFile, 0, cfg)
+
+	err := s.ValidateConfig(ConfigSnapshot{RepoURL: "https://x", RulesMerge: true})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "RulesMerge")
+}
+
+// ---- flush 写错误分支 ----
+
+func TestScanState_Flush_WriteError(t *testing.T) {
+	// stateFile 在一个不存在的目录 → flush 写 .tmp 失败
+	s := NewScanStateWithCheckpoint("s", "https://x", "", "/nonexistent/dir/state.json", 0)
+	assert.Error(t, s.Flush())
+}
+
+func TestScanState_Flush_RenameError(t *testing.T) {
+	// filePath 指向一个已存在的目录 → WriteFile(.tmp) 成功但 os.Rename 到目录失败
+	tmpDir := t.TempDir()
+	dirAsFile := filepath.Join(tmpDir, "state.json")
+	require.NoError(t, os.Mkdir(dirAsFile, 0755))
+	s := NewScanStateWithCheckpoint("s", "https://x", "", dirAsFile, 0)
+	err := s.Flush()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "rename")
+}
+
+func TestScanState_LoadScanState_ReadError(t *testing.T) {
+	// filePath 是一个目录 → os.ReadFile 返回非 NotExist 错误（read state file 分支）
+	tmpDir := t.TempDir()
+	_, err := LoadScanState(tmpDir) // 读目录触发 "is a directory" 错误
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "read state file")
+}
+
+func TestScanState_LoadScanState_ParseError(t *testing.T) {
+	// 损坏 JSON → json.Unmarshal 失败（parse state file 分支）
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "state.json")
+	require.NoError(t, os.WriteFile(p, []byte("{not-json"), 0644))
+	_, err := LoadScanState(p)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "parse state file")
+}
+
+func TestScanState_ClearFailedEntry_NotPresent(t *testing.T) {
+	// path 不在 failedSet → early return 分支
+	s := NewScanStateWithCheckpoint("s", "https://x", "", filepath.Join(t.TempDir(), "state.json"), 0)
+	// 未标记就清除 → 不 panic，无副作用
+	s.ClearFailedEntry("/not/marked")
+	assert.Empty(t, s.FailedEntries)
+}
+
+func TestScanState_GetFailedDirs_Empty(t *testing.T) {
+	// 无 FailedDirs → return nil 分支
+	s := NewScanStateWithCheckpoint("s", "https://x", "", filepath.Join(t.TempDir(), "state.json"), 0)
+	assert.Nil(t, s.GetFailedDirs())
+}
+
+func TestRemoveFromStringSlice_NotFound(t *testing.T) {
+	// val 不在 slice → return slice 分支
+	got := removeFromStringSlice([]string{"a", "b"}, "z")
+	assert.Equal(t, []string{"a", "b"}, got)
+}
+
+func TestRemoveFromFailedEntries_NotFound(t *testing.T) {
+	// path 不在 entries → return entries 分支
+	got := removeFromFailedEntries([]FailedEntry{{Path: "/a"}, {Path: "/b"}}, "/z")
+	assert.Equal(t, 2, len(got))
+}

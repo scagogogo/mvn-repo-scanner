@@ -160,3 +160,24 @@ func TestLoadRulesWithLevel_CustomFileMergesWithBuiltin(t *testing.T) {
 	}
 	require.NotNil(t, tok, "new custom rule should be added on merge")
 }
+
+func TestLoadRulesFromFile_BadYAML(t *testing.T) {
+	// 损坏的 YAML → yaml.Unmarshal 失败分支
+	tmpDir := t.TempDir()
+	yamlPath := filepath.Join(tmpDir, "bad.yaml")
+	require.NoError(t, os.WriteFile(yamlPath, []byte("rules: [unclosed"), 0644))
+	_, err := LoadRulesFromFile(yamlPath)
+	assert.Error(t, err)
+}
+
+func TestLoadRulesFromFile_NotFound(t *testing.T) {
+	// os.ReadFile 失败分支
+	_, err := LoadRulesFromFile("/nonexistent/path/rules.yaml")
+	assert.Error(t, err)
+}
+
+func TestLoadRulesWithLevel_CustomFileLoadFails(t *testing.T) {
+	// rulesFile 不存在 → LoadRulesFromFile 失败 → LoadRulesWithLevel 返回 err（line 119）
+	_, err := LoadRulesWithLevel("/nonexistent/path/rules.yaml", "core", false)
+	assert.Error(t, err)
+}

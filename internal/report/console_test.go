@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scagogogo/mvn-repo-scanner/internal/detector"
 	"github.com/scagogogo/mvn-repo-scanner/internal/scanner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -112,4 +113,22 @@ func TestTruncate(t *testing.T) {
 	assert.Equal(t, "abc", truncate("abc", 5))
 	assert.Equal(t, "abcde...", truncate("abcdef", 5))
 	assert.Equal(t, "", truncate("", 5))
+}
+
+func TestNewConsoleReporter(t *testing.T) {
+	// NewConsoleReporter 默认写 stdout
+	cr := NewConsoleReporter()
+	require.NotNil(t, cr)
+	assert.Equal(t, os.Stdout, cr.writer)
+}
+
+func TestNewConsoleReporterWithWriter_Dash(t *testing.T) {
+	// 验证自定义 writer 正常写入 PrintSummary
+	var buf bytes.Buffer
+	cr := NewConsoleReporterWithWriter(&buf)
+	summary := &scanner.Summary{TotalDiscovered: 5, TotalScanned: 5, TotalFailed: 0, TotalFindings: 2}
+	summary.BySeverity = map[detector.Severity]int{detector.SeverityCritical: 2}
+	cr.PrintSummary(summary)
+	assert.Contains(t, buf.String(), "Discovered: 5")
+	assert.Contains(t, buf.String(), "CRITICAL: 2")
 }

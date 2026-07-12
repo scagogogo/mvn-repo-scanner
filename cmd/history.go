@@ -29,7 +29,7 @@ func runHistory(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("init workspace: %w", err)
 	}
 
-	store, err := storage.OpenStore(ws.DBPath)
+	store, err := openStoreFn(ws.DBPath)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}

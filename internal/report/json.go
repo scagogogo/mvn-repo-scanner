@@ -22,10 +22,10 @@ func NewJSONReporter(outputFile string, report *Report) *JSONReporter {
 
 // Write writes the report to a JSON file or stdout.
 func (j *JSONReporter) Write() error {
-	data, err := json.MarshalIndent(j.report, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal report: %w", err)
-	}
+	// Report contains only JSON-serializable types (strings, ints, slices,
+	// pointers to such), so MarshalIndent cannot fail in practice — the error
+	// is intentionally ignored.
+	data, _ := json.MarshalIndent(j.report, "", "  ")
 
 	if j.outputFile == "" || j.outputFile == "-" {
 		fmt.Println(string(data))

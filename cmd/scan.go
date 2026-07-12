@@ -60,6 +60,22 @@ func init() {
 	scanCmd.Flags().StringVar(&cfg.TaskID, "task-id", cfg.TaskID, "associate this run with a persisted task ID (for interval scheduling)")
 }
 
+// scanRunner is the subset of *scanner.Scanner that runScan uses (OnResult +
+// Run). Indirecting through this interface lets tests inject a scanner whose
+// Run returns an error, to cover runScan's "scan failed" branches (which the
+// real Scanner.Run never returns — it is fault-tolerant and always returns
+// nil error).
+type scanRunner interface {
+	OnResult(fn scanner.ProgressCallback)
+	Run(ctx context.Context) (*scanner.Summary, error)
+}
+
+// newScannerFn builds the real scanner. Indirected as a package-level variable
+// so tests can swap in a failing runner.
+var newScannerFn = func(c *config.Config, opts ...scanner.ScannerOption) scanRunner {
+	return scanner.NewScanner(c, opts...)
+}
+
 func runScan(cmd *cobra.Command, args []string) error {
 	// Setup graceful shutdown with state flush guarantee
 	ctx, cancel := context.WithCancel(context.Background())
@@ -79,7 +95,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 	ws.EnforceCacheLimit()
 
-	store, err := storage.OpenStore(ws.DBPath)
+	store, err := openStoreFn(ws.DBPath)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
@@ -224,7 +240,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	scan := scanner.NewScanner(cfg, scannerOpts...)
+	scan := newScannerFn(cfg, scannerOpts...)
 
 	// Setup reporting
 	scanID := fmt.Sprintf("scan-%s", time.Now().Format("20060102-150405"))
@@ -248,7 +264,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		scanState.SetMaxRetries(cfg.Retries)
 
 		// Re-apply state to scanner since we just created it
-		scan = scanner.NewScanner(cfg, append(scannerOpts,
+		scan = newScannerFn(cfg, append(scannerOpts,
 			scanner.WithState(scanState),
 			scanner.WithDiscoveryCacher(scanState),
 			scanner.WithFailedRetryer(scanState),

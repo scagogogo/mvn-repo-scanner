@@ -33,6 +33,8 @@ func TestParseRetryAfter(t *testing.T) {
 		{"capped at 5min", "99999", 300},
 		{"negative treated as zero", "-5", 0},
 		{"garbage", "not-a-date", 0},
+		{"whitespace trimmed", "  30  ", 30},
+		{"tab trimmed", "\t30\t", 30},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -44,6 +46,28 @@ func TestParseRetryAfter(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseRetryAfter_HTTPDate(t *testing.T) {
+	// HTTP-date 形式：未来时间 → 正数；过去时间 → 0；超过 5min → 截断到 5min
+	future := time.Now().Add(2 * time.Second).UTC().Format(time.RFC1123)
+	got := parseRetryAfter(future)
+	assert.True(t, got > 0 && got <= 2*time.Second, "got %v", got)
+
+	// 过去的日期 → d<0 → 返回 0
+	past := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC1123)
+	assert.Equal(t, time.Duration(0), parseRetryAfter(past))
+
+	// 远超 5min 的未来 → 截断到 5min
+	far := time.Now().Add(1 * time.Hour).UTC().Format(time.RFC1123)
+	assert.Equal(t, 5*time.Minute, parseRetryAfter(far))
+}
+
+func TestTrimHTTPWhitespace(t *testing.T) {
+	assert.Equal(t, "x", trimHTTPWhitespace("  x  "))
+	assert.Equal(t, "x", trimHTTPWhitespace("\tx\t"))
+	assert.Equal(t, "", trimHTTPWhitespace("   "))
+	assert.Equal(t, "x y", trimHTTPWhitespace(" x y ")) // 只trim首尾，中间保留
 }
 
 func TestIsRetryable(t *testing.T) {

@@ -23,17 +23,23 @@ func init() {
 	rulesCmd.Flags().StringVarP(&rulesLevel, "level", "l", "all", "rule set to show: core, extended, all")
 }
 
-func runRules(cmd *cobra.Command, args []string) error {
-	var rules []*detector.Rule
-
-	switch rulesLevel {
+// rulesForLevelFn resolves the rule list for the current --level. Indirected as
+// a package-level variable so tests can inject a list containing a disabled
+// rule, to cover runRules's "disabled" status branch (the built-in rule sets
+// are all enabled, so the branch is otherwise unreachable).
+var rulesForLevelFn = func(level string) []*detector.Rule {
+	switch level {
 	case "core":
-		rules = detector.DefaultRules()
+		return detector.DefaultRules()
 	case "extended":
-		rules = detector.ExtendedRules()
+		return detector.ExtendedRules()
 	default:
-		rules = detector.AllRules()
+		return detector.AllRules()
 	}
+}
+
+func runRules(cmd *cobra.Command, args []string) error {
+	rules := rulesForLevelFn(rulesLevel)
 
 	fmt.Printf("Detection Rules (%s, %d rules)\n\n", rulesLevel, len(rules))
 

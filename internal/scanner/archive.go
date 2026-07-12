@@ -252,7 +252,11 @@ func (s *Scanner) scanNestedZipEntry(f *zip.File, depth int, st *archiveScanStat
 	}
 	tmp.Close()
 
-	// Re-dispatch by the nested entry's extension.
+	// Re-dispatch by the nested entry's extension. scanNestedZipEntry is only
+	// called for entries that passed isNestedArchive(), which returns true only
+	// for .jar/.war/.ear/.zip — so only the first case is reachable in production;
+	// the other cases are kept for symmetry, future archive types, and direct
+	// unit testing.
 	ext := strings.ToLower(filepath.Ext(f.Name))
 	switch ext {
 	case ".jar", ".war", ".ear", ".zip":
@@ -261,9 +265,8 @@ func (s *Scanner) scanNestedZipEntry(f *zip.File, depth int, st *archiveScanStat
 		return s.scanTarArchive(tmpPath, false, depth+1, st)
 	case ".gz", ".tgz":
 		return s.scanTarArchive(tmpPath, true, depth+1, st)
-	default:
-		return nil, nil
 	}
+	return nil, nil
 }
 
 // scanTarArchive scans a (optionally gzip-compressed) tar archive. Used for

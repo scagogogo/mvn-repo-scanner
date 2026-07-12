@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -340,4 +341,53 @@ func TestCursorWalker_CursorSerializable(t *testing.T) {
 	}, func() bool { return false })
 	require.NoError(t, err)
 	assert.Equal(t, 3, len(resumed), "deserialized cursor should resume correctly")
+}
+
+func TestCursor_CursorDepth(t *testing.T) {
+	assert.Equal(t, 0, Cursor{}.CursorDepth())
+	assert.Equal(t, 1, RootCursor().CursorDepth())
+	assert.Equal(t, 3, Cursor{{"", 0}, {"com", 1}, {"com/example", 2}}.CursorDepth())
+}
+
+func TestCursor_String(t *testing.T) {
+	// 空游标
+	assert.Equal(t, "cursor[]", Cursor{}.String())
+	// 多帧游标
+	s := Cursor{{DirPath: "com", NextIdx: 1}, {DirPath: "com/example", NextIdx: 0}}.String()
+	assert.Contains(t, s, "{com@1}")
+	assert.Contains(t, s, "{com/example@0}")
+	assert.True(t, strings.HasPrefix(s, "cursor["))
+}
+
+func TestCursorWalker_EmptyStartCursor(t *testing.T) {
+	// 传空 Cursor{}（len==0）→ Walk 内部初始化为 RootCursor（line 96-98）
+	fetcher := buildMockRepo()
+	w := NewCursorWalker(fetcher, "https://repo.example.com/maven2")
+	count := 0
+	cur, err := w.Walk(context.Background(), Cursor{}, func(a Artifact) {
+		count++
+	}, func() bool { return false })
+	require.NoError(t, err)
+	assert.Equal(t, 0, len(cur))
+	assert.True(t, count >= 1, "should discover artifacts from empty cursor")
+}
+
+func TestCursorWalker_ContextCanceled(t *testing.T) {
+	// ctx 已取消 → Walk 返回 cur, ctx.Err()（line 102-104）
+	fetcher := buildMockRepo()
+	w := NewCursorWalker(fetcher, "https://repo.example.com/maven2")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cur, err := w.Walk(ctx, RootCursor(), func(a Artifact) {}, func() bool { return false })
+	assert.Error(t, err)
+	assert.True(t, len(cur) >= 1, "cursor should hold the start frame")
+}
+
+func TestCursorWalker_BuildArtifact_TooFewSegments(t *testing.T) {
+	// buildArtifact: dirPath 段数 < 3 → 返回 nil（line 189-191）
+	fetcher := buildMockRepo()
+	w := NewCursorWalker(fetcher, "https://repo.example.com/maven2")
+	// segs=["com","lib"] len=2 < 3
+	art := w.buildArtifact("com/lib", entry{Name: "lib.jar", URL: "u"})
+	assert.Nil(t, art)
 }

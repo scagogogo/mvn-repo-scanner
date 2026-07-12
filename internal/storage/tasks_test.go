@@ -237,3 +237,20 @@ func TestFormatInterval(t *testing.T) {
 	assert.Equal(t, "1m0s", FormatInterval(60))
 	assert.Equal(t, "1h0m0s", FormatInterval(3600))
 }
+
+// 覆盖 SetTaskStatus / DeleteTask / GetTask 的 not-found 分支
+func TestTasks_NotFound(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	// GetTask 不存在 → ErrTaskNotFound
+	got, err := store.GetTask("does-not-exist")
+	assert.ErrorIs(t, err, ErrTaskNotFound)
+	assert.Nil(t, got)
+
+	// SetTaskStatus 不存在 → ErrTaskNotFound
+	assert.ErrorIs(t, store.SetTaskStatus("nope", TaskActive), ErrTaskNotFound)
+
+	// DeleteTask 不存在 → ErrTaskNotFound
+	assert.ErrorIs(t, store.DeleteTask("nope"), ErrTaskNotFound)
+}
