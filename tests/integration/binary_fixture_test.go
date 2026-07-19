@@ -177,3 +177,98 @@ func emptyJar(t *testing.T) []byte {
 	})
 	return emptyJarBytes
 }
+
+// startMultiSubtreeMockRepo 启动含 2 个 disjoint subtree 的仓库。
+// com/example/lib 和 com/example/lib2 各有 2 个 version，jar 下载慢 5s。
+// 用于验证多 disjoint subtree 并发 in-flight 跨崩溃后 revisit 重访多个目录。
+func startMultiSubtreeMockRepo(t *testing.T, jarBytes []byte) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			fmt.Fprint(w, `<a href="com/">com/</a>`)
+		case "/com/":
+			fmt.Fprint(w, `<a href="example/">example/</a>`)
+		case "/com/example/":
+			fmt.Fprint(w, `<a href="lib/">lib/</a><a href="lib2/">lib2/</a>`)
+		case "/com/example/lib/":
+			fmt.Fprint(w, `<a href="1.0/">1.0/</a><a href="2.0/">2.0/</a>`)
+		case "/com/example/lib2/":
+			fmt.Fprint(w, `<a href="1.0/">1.0/</a><a href="2.0/">2.0/</a>`)
+		case "/com/example/lib/1.0/":
+			fmt.Fprint(w, `<a href="lib-1.0.jar">lib-1.0.jar</a>`)
+		case "/com/example/lib/2.0/":
+			fmt.Fprint(w, `<a href="lib-2.0.jar">lib-2.0.jar</a>`)
+		case "/com/example/lib2/1.0/":
+			fmt.Fprint(w, `<a href="lib2-1.0.jar">lib2-1.0.jar</a>`)
+		case "/com/example/lib2/2.0/":
+			fmt.Fprint(w, `<a href="lib2-2.0.jar">lib2-2.0.jar</a>`)
+		case "/com/example/lib/1.0/lib-1.0.jar",
+			"/com/example/lib/2.0/lib-2.0.jar",
+			"/com/example/lib2/1.0/lib2-1.0.jar",
+			"/com/example/lib2/2.0/lib2-2.0.jar":
+			time.Sleep(5 * time.Second) // 慢下载卡住多 worker
+			w.Header().Set("Content-Type", "application/java-archive")
+			w.Write(jarBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// corruptStateFile 用坏 JSON 覆盖 state 文件（或其 .bak），模拟磁盘损坏。
+// which="main" 覆盖主文件，which="bak" 覆盖 .bak。
+func corruptStateFile(t *testing.T, stateFile, which string) {
+	t.Helper()
+	target := stateFile
+	if which == "bak" {
+		target = stateFile + ".bak"
+	}
+	require.NoError(t, os.WriteFile(target, []byte("{ broken json !!! "), 0644))
+}
+
+// startLargeJarMockRepo 启动含较大 jar 的仓库，触发 DiskWatcher 预算路径。
+// jar 下载慢 5s 卡 worker，提供 kill 时窗。用于验证预算在 SIGKILL 后 resume 不卡死。
+func startLargeJarMockRepo(t *testing.T, jarBytes []byte) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			fmt.Fprint(w, `<a href="com/">com/</a>`)
+		case "/com/":
+			fmt.Fprint(w, `<a href="example/">example/</a>`)
+		case "/com/example/":
+			fmt.Fprint(w, `<a href="lib/">lib/</a>`)
+		case "/com/example/lib/":
+			fmt.Fprint(w, `<a href="1.0/">1.0/</a><a href="2.0/">2.0/</a>`)
+		case "/com/example/lib/1.0/":
+			fmt.Fprint(w, `<a href="lib-1.0.jar">lib-1.0.jar</a>`)
+		case "/com/example/lib/2.0/":
+			fmt.Fprint(w, `<a href="lib-2.0.jar">lib-2.0.jar</a>`)
+		case "/com/example/lib/1.0/lib-1.0.jar",
+			"/com/example/lib/2.0/lib-2.0.jar":
+			time.Sleep(5 * time.Second)
+			w.Header().Set("Content-Type", "application/java-archive")
+			w.Write(jarBytes)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// largeJar 生成含 1MB entry 的 zip jar，触发 DiskWatcher 预算路径。
+func largeJar(t *testing.T) []byte {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	w := zip.NewWriter(buf)
+	fw, err := w.Create("big.bin")
+	require.NoError(t, err)
+	_, err = fw.Write(make([]byte, 1024*1024)) // 1MB
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	return buf.Bytes()
+}
