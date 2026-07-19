@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/scagogogo/mvn-repo-scanner/internal/config"
+	"github.com/scagogogo/mvn-repo-scanner/internal/state"
 	"github.com/scagogogo/mvn-repo-scanner/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -371,6 +372,7 @@ func TestRunScan_WorkspaceError(t *testing.T) {
 // runScan 的 MarkInterrupted（line 346-348）+ runStatus interrupted（line 365-367）：
 // 慢 mock repo 让 scan 长时间运行，发 SIGTERM → runScan 的 signal handler cancel ctx
 // → scan.Run 返回（ctx 取消）→ MarkInterrupted + runStatus="interrupted"。
+// 补充断言：state status=interrupted（或 completed 若 cancel 前跑完）+ resume 后不丢不重。
 func TestRunScan_SignalInterrupts(t *testing.T) {
 	redirectHome(t)
 	tmpDir := t.TempDir()
@@ -380,6 +382,7 @@ func TestRunScan_SignalInterrupts(t *testing.T) {
 	srv := startSlowMockMavenRepo(t, jarPath, 500*time.Millisecond)
 	defer srv.Close()
 
+	stateFile := filepath.Join(tmpDir, "state.json")
 	cfg = &config.Config{
 		RepoURL:      srv.URL,
 		GroupFilter:  "com.example",
@@ -387,7 +390,7 @@ func TestRunScan_SignalInterrupts(t *testing.T) {
 		Timeout:      30 * time.Second,
 		MaxFileSize:  "50MB",
 		RulesLevel:   "core",
-		StateFile:    filepath.Join(tmpDir, "state.json"),
+		StateFile:    stateFile,
 		TaskID:       "sig-task",
 		ScanInterval: 1 * time.Hour,
 		Output:       "console",
@@ -415,6 +418,35 @@ func TestRunScan_SignalInterrupts(t *testing.T) {
 	task, err := store.GetTask("sig-task")
 	require.NoError(t, err)
 	assert.Equal(t, "interrupted", task.LastRunStatus)
+
+	// 断言 state 文件被 flush 且 status 标记正确（interrupted 或 completed）
+	loaded, err := state.LoadScanState(stateFile)
+	require.NoError(t, err, "state file must be flushed after SIGTERM")
+	assert.Contains(t, []state.ScanStatus{state.ScanInterrupted, state.ScanCompleted},
+		loaded.GetStatus(), "state status should be interrupted or completed after SIGTERM")
+
+	// resume 应能续跑并完成（不丢不重）—— 重置 cfg 用相同 repo + resume
+	cfg.Resume = true
+	cfg.RetryFailed = true
+	cfg.TaskID = ""      // 不重复 task 注册逻辑
+	cfg.ScanInterval = 0 // 一次性，不再调度
+	resumeDone := make(chan struct{})
+	go func() {
+		_ = withStdoutCapture(t, func() {
+			_ = runScan(scanCmd, nil)
+		})
+		close(resumeDone)
+	}()
+	select {
+	case <-resumeDone:
+	case <-time.After(15 * time.Second):
+		t.Fatal("resume after SIGTERM should finish in 15s")
+	}
+
+	resumed, err := state.LoadScanState(stateFile)
+	require.NoError(t, err)
+	assert.Equal(t, state.ScanCompleted, resumed.GetStatus(),
+		"resume should reach completed status")
 }
 
 // runScan 的 NewDetector err（line 143-145）：自定义 RulesFile 含坏 file_patterns
