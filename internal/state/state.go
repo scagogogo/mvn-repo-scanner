@@ -20,6 +20,15 @@ var ErrStateNotFound = errors.New("scan state file not found")
 // ErrVersionMismatch is returned when the state file version is not supported.
 var ErrVersionMismatch = errors.New("scan state version not supported")
 
+// flushHook is a test-only injection point to simulate a crash mid-flush
+// (e.g. power loss after writing .tmp but before rename). When non-nil it is
+// invoked after the .tmp file is written (and fsynced) but before the .bak
+// backup and rename. A panic from the hook mimics a process killed mid-write
+// so tests can verify the main file is not left corrupt and .bak survives.
+// Production code leaves this nil; it is not exported to keep the surface
+// internal. Set via testfile in the same package.
+var flushHook func(filePath string)
+
 // ScanStatus represents the overall status of a scan session.
 type ScanStatus string
 
@@ -633,6 +642,12 @@ func (s *ScanState) GetResumeEstimate() (status ScanStatus, discovered, scanned,
 //      loss yields a truncated/empty state file.)
 //   2. Before overwriting, copy the previous good file to .bak so a corrupt
 //      write or future parse failure can fall back to it in LoadScanState.
+//      The previous file is validated before backup: if it is already corrupt
+//      (e.g. a prior half-written rename survived as the main file), we skip
+//      the backup rather than overwriting the last good .bak with garbage.
+//   3. flushHook (test-only) fires after .tmp is durable but before .bak/rename,
+//      so a panic there leaves .tmp on disk and the main file untouched —
+//      modeling a kill mid-flush for crash-recovery tests.
 func (s *ScanState) flush() error {
 	s.LastUpdated = time.Now().Format(time.RFC3339)
 	s.dirtyCount = 0
@@ -654,9 +669,21 @@ func (s *ScanState) flush() error {
 		f.Close()
 	}
 
+	// Test-only crash injection: a panic here leaves .tmp on disk and the
+	// main file + .bak untouched, modeling a process killed mid-flush.
+	if flushHook != nil {
+		flushHook(s.filePath)
+	}
+
 	// Back up the previous good state file (if any) before replacing it.
+	// Validate it first: if the main file is already corrupt, do NOT copy it
+	// over .bak (that would destroy the last good backup). Only well-formed
+	// previous content is preserved as .bak.
 	if prev, err := os.ReadFile(s.filePath); err == nil && len(prev) > 0 {
-		_ = os.WriteFile(s.filePath+".bak", prev, 0644)
+		if json.Valid(prev) {
+			_ = os.WriteFile(s.filePath+".bak", prev, 0644)
+		}
+		// If prev is not valid JSON, .bak is left as-is (last good backup).
 	}
 
 	if err := os.Rename(tmpFile, s.filePath); err != nil {
