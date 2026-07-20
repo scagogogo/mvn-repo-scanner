@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // AuthConfig holds optional credentials for private Maven repositories.
@@ -63,6 +65,7 @@ type Browser struct {
 	client      *http.Client
 	groupFilter string
 	auth        AuthConfig
+	limiter    *rate.Limiter // optional QPS throttle for discovery fetches
 }
 
 // NewBrowser creates a new repository browser.
@@ -77,6 +80,20 @@ func NewBrowser(timeout time.Duration, groupFilter string) *Browser {
 func NewBrowserWithAuth(timeout time.Duration, groupFilter string, auth AuthConfig) *Browser {
 	b := NewBrowser(timeout, groupFilter)
 	b.auth = auth
+	return b
+}
+
+// WithLimiter attaches a rate limiter so discovery fetches are throttled. nil
+// means unlimited (backward compatible). Returns the browser for chaining.
+func (b *Browser) WithLimiter(l *rate.Limiter) *Browser {
+	b.limiter = l
+	return b
+}
+
+// WithMaxConnsPerHost rebuilds the HTTP client with a custom per-host connection
+// cap, overriding the default 32. Useful when discovery concurrency is raised.
+func (b *Browser) WithMaxConnsPerHost(timeout time.Duration, maxConns int) *Browser {
+	b.client = newHTTPClient(timeout, maxConns)
 	return b
 }
 
@@ -159,6 +176,14 @@ func (b *Browser) FetchPage(ctx context.Context, url string) (string, error) {
 
 // fetchPage fetches and returns the HTML content of a repository page.
 func (b *Browser) fetchPage(ctx context.Context, url string) (string, error) {
+	// Discovery QPS throttle: if a limiter is attached, wait for a token before
+	// each HTTP fetch so the discovery phase is polite to the repo (shared QPS
+	// budget with downloads). nil limiter = unlimited (backward compatible).
+	if b.limiter != nil {
+		if err := b.limiter.Wait(ctx); err != nil {
+			return "", fmt.Errorf("rate limit wait: %w", err)
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err

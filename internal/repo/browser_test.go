@@ -2,13 +2,17 @@ package repo
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 )
 
 func TestHTMLListingParsing(t *testing.T) {
@@ -248,4 +252,45 @@ func TestBrowser_Walk_SubdirFetchFailsContinues(t *testing.T) {
 	require.NoError(t, err)
 	// good 子目录虽无完整 GAV 段（buildArtifact 返回 nil），但 walk continue 分支已被触发
 	_ = arts
+}
+
+// TestBrowser_LimiterThrottlesDiscovery 验证 QPS limiter 限制 discovery 请求速率。
+// 用一个记录请求时间戳的 mock server + 限制 2 QPS，发 4 个请求应耗时 >= 1s。
+func TestBrowser_LimiterThrottlesDiscovery(t *testing.T) {
+	var mu sync.Mutex
+	var times []time.Time
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		times = append(times, time.Now())
+		mu.Unlock()
+		fmt.Fprint(w, `<a href="a/">a/</a>`)
+	}))
+	defer srv.Close()
+
+	b := NewBrowser(5*time.Second, "")
+	// 2 QPS, bucket=2 → 4 请求至少跨 ~1s（前 2 个用预存 token，后 2 个每秒 1 个）
+	b = b.WithLimiter(rate.NewLimiter(rate.Limit(2), 2))
+
+	ctx := context.Background()
+	for i := 0; i < 4; i++ {
+		_, err := b.fetchPage(ctx, srv.URL)
+		require.NoError(t, err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, times, 4)
+	elapsed := times[3].Sub(times[0])
+	// 第 1 与第 4 个请求间隔应 >= 1s（2 预存 + 2 限流，理论上 ~1.0s，留 900ms 容差）
+	assert.GreaterOrEqual(t, elapsed, 900*time.Millisecond,
+		"4 requests at 2 QPS should take ~1s, got %s", elapsed)
+}
+
+// TestBrowser_WithMaxConnsPerHost 验证连接池 cap 被应用。
+func TestBrowser_WithMaxConnsPerHost(t *testing.T) {
+	b := NewBrowser(5*time.Second, "")
+	b = b.WithMaxConnsPerHost(5*time.Second, 64)
+	tr, ok := b.client.Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.Equal(t, 64, tr.MaxConnsPerHost)
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/scagogogo/mvn-repo-scanner/internal/state"
 	"github.com/scagogogo/mvn-repo-scanner/internal/storage"
 	"github.com/spf13/cobra"
+	"golang.org/x/time/rate"
 )
 
 var scanCmd = &cobra.Command{
@@ -206,6 +207,23 @@ func runScan(cmd *cobra.Command, args []string) error {
 		Token:    cfg.AuthToken,
 	}
 	browser := repo.NewBrowserWithAuth(cfg.Timeout, cfg.GroupFilter, auth)
+	// Discovery QPS throttle: share the same QPS budget as downloads so the
+	// whole scan is polite to the repo. qps=0 → no limiter (unlimited).
+	if cfg.QPS > 0 {
+		browser = browser.WithLimiter(rate.NewLimiter(rate.Limit(cfg.QPS), cfg.QPS))
+	}
+	// Discovery connection pool: auto = max(concurrency, 32), capped at 128.
+	maxConns := cfg.BrowserConcurrency
+	if maxConns <= 0 {
+		maxConns = cfg.Concurrency
+		if maxConns < 32 {
+			maxConns = 32
+		}
+	}
+	if maxConns > 128 {
+		maxConns = 128
+	}
+	browser = browser.WithMaxConnsPerHost(cfg.Timeout, maxConns)
 	maxBytes, _ := cfg.ParseMaxFileSize()
 	dl := repo.NewDownloaderWithAuth(cfg.Timeout, cfg.Retries, cfg.QPS, ws.CacheDir, maxBytes, auth)
 
