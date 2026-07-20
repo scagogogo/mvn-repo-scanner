@@ -225,7 +225,18 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 	browser = browser.WithMaxConnsPerHost(cfg.Timeout, maxConns)
 	maxBytes, _ := cfg.ParseMaxFileSize()
-	dl := repo.NewDownloaderWithAuth(cfg.Timeout, cfg.Retries, cfg.QPS, ws.CacheDir, maxBytes, auth)
+	// Download connection pool: auto = max(download-concurrency or concurrency, 64), capped at 128.
+	dlMaxConns := cfg.DownloadConcurrency
+	if dlMaxConns <= 0 {
+		dlMaxConns = cfg.Concurrency
+	}
+	if dlMaxConns < 64 {
+		dlMaxConns = 64
+	}
+	if dlMaxConns > 128 {
+		dlMaxConns = 128
+	}
+	dl := repo.NewDownloaderWithAuth(cfg.Timeout, cfg.Retries, cfg.QPS, ws.CacheDir, maxBytes, auth, dlMaxConns)
 
 	// Create disk watcher for budget-based download throttling
 	var diskWatcher *scanner.DiskWatcher

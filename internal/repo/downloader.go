@@ -34,11 +34,13 @@ type DownloadResult struct {
 // NewDownloader creates a new downloader with the given configuration.
 // maxFileSize limits individual file downloads (0 = no limit).
 func NewDownloader(timeout time.Duration, retries int, qps int, tempDir string, maxFileSize int64) *Downloader {
-	return NewDownloaderWithAuth(timeout, retries, qps, tempDir, maxFileSize, AuthConfig{})
+	return NewDownloaderWithAuth(timeout, retries, qps, tempDir, maxFileSize, AuthConfig{}, 0)
 }
 
 // NewDownloaderWithAuth creates a downloader with credentials for private repositories.
-func NewDownloaderWithAuth(timeout time.Duration, retries int, qps int, tempDir string, maxFileSize int64, auth AuthConfig) *Downloader {
+// maxConnsPerHost tunes the per-host connection pool (0 = default 32). Raising it
+// lets high download-concurrency actually reuse connections instead of churning TLS.
+func NewDownloaderWithAuth(timeout time.Duration, retries int, qps int, tempDir string, maxFileSize int64, auth AuthConfig, maxConnsPerHost int) *Downloader {
 	var limiter *rate.Limiter
 	if qps > 0 {
 		limiter = rate.NewLimiter(rate.Limit(qps), qps)
@@ -49,7 +51,7 @@ func NewDownloaderWithAuth(timeout time.Duration, retries int, qps int, tempDir 
 	}
 
 	return &Downloader{
-		client:   newHTTPClient(timeout, 64),
+		client:   newHTTPClient(timeout, maxConnsPerHost),
 		retries:  retries,
 		limiter:  limiter,
 		tempDir:  tempDir,

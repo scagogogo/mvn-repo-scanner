@@ -317,15 +317,23 @@ func readFile(t *testing.T, path string) string {
 
 func TestNewDownloaderWithAuth_EmptyTempDir(t *testing.T) {
 	// tempDir="" → 回退到 os.TempDir()
-	d := NewDownloaderWithAuth(0, 0, 0, "", 0, AuthConfig{Token: "t"})
+	d := NewDownloaderWithAuth(0, 0, 0, "", 0, AuthConfig{Token: "t"}, 0)
 	assert.Equal(t, os.TempDir(), d.tempDir)
 	assert.True(t, d.auth.IsSet())
 }
 
 func TestNewDownloaderWithAuth_QPSLimiter(t *testing.T) {
 	// qps>0 → 创建 limiter
-	d := NewDownloaderWithAuth(0, 0, 5, "", 0, AuthConfig{})
+	d := NewDownloaderWithAuth(0, 0, 5, "", 0, AuthConfig{}, 0)
 	require.NotNil(t, d.limiter)
+}
+
+// TestNewDownloaderWithAuth_MaxConnsPerHost 验证 maxConnsPerHost 被应用到 transport。
+func TestNewDownloaderWithAuth_MaxConnsPerHost(t *testing.T) {
+	d := NewDownloaderWithAuth(0, 0, 0, "", 0, AuthConfig{}, 96)
+	tr, ok := d.client.Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.Equal(t, 96, tr.MaxConnsPerHost)
 }
 
 func TestDownloader_BackoffFor_429RetryAfter(t *testing.T) {
