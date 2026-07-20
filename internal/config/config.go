@@ -29,6 +29,18 @@ type Config struct {
 	RulesMerge          bool          `mapstructure:"rules-merge"`
 	DownloadConcurrency int           `mapstructure:"download-concurrency"`
 	ScanConcurrency     int           `mapstructure:"scan-concurrency"`
+	// IncludeSources controls whether -sources.jar (containing .java source) is
+	// scanned. Sources jars are the main place real secrets leak on Maven Central
+	// (binary .class jars are skipped by the binary-content pre-check). Off by
+	// default because sources jars are large and numerous; enable to hunt leaks.
+	IncludeSources bool `mapstructure:"include-sources"`
+	// SkipPom controls whether .pom/.xml files are scanned. On by default (pom
+	// metadata may leak), but users scanning large repos can skip for speed.
+	SkipPom bool `mapstructure:"skip-pom"`
+	// BrowserConcurrency caps the discovery phase connection pool. 0 = auto
+	// (max(Concurrency, 32)). Discovery is HTML-listing fetches, lighter than
+	// downloads, but a huge tree like com.amazonaws still opens many sockets.
+	BrowserConcurrency int `mapstructure:"browser-concurrency"`
 	DiskBudgetMB        int           `mapstructure:"disk-budget"`
 	RetryFailed         bool          `mapstructure:"retry-failed"`
 	Rediscover          bool          `mapstructure:"rediscover"`
@@ -59,6 +71,9 @@ func DefaultConfig() *Config {
 		RulesLevel:          "core",
 		DownloadConcurrency: 0,
 		ScanConcurrency:     0, // 0 = fall back to Concurrency (CPU-bound scan decoupled from IO-bound download)
+		IncludeSources:      false,
+		SkipPom:             false,
+		BrowserConcurrency:  0, // 0 = auto (max(Concurrency, 32))
 		DiskBudgetMB:        1000, // 1GB default disk budget for temp files
 	}
 }
@@ -95,6 +110,9 @@ func (c *Config) Validate() error {
 	}
 	if c.ScanConcurrency < 0 {
 		return fmt.Errorf("scan concurrency must be non-negative (0 = use concurrency)")
+	}
+	if c.BrowserConcurrency < 0 {
+		return fmt.Errorf("browser concurrency must be non-negative (0 = auto)")
 	}
 	if c.DiskBudgetMB < 0 {
 		return fmt.Errorf("disk budget must be non-negative")
