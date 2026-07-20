@@ -47,6 +47,11 @@ type ConfigSnapshot struct {
 	RulesFile   string `json:"rules_file,omitempty"`
 	RulesMerge  bool   `json:"rules_merge,omitempty"`
 	MaxFileSize string `json:"max_file_size"`
+	// IncludeSources/SkipPom affect which artifacts discovery yields, so a resume
+	// with different classifier filters would rescan a different artifact set —
+	// record them and validate on resume to surface the mismatch.
+	IncludeSources bool `json:"include_sources,omitempty"`
+	SkipPom        bool `json:"skip_pom,omitempty"`
 }
 
 // FailedEntry records a failed artifact with its error.
@@ -613,6 +618,15 @@ func (s *ScanState) ValidateConfig(cfg ConfigSnapshot) error {
 	// resumed result set incomparable. Refuse resume across a different cap.
 	if s.ConfigSnapshot.MaxFileSize != "" && s.ConfigSnapshot.MaxFileSize != cfg.MaxFileSize {
 		return fmt.Errorf("state file MaxFileSize (%q) does not match current MaxFileSize (%q)", s.ConfigSnapshot.MaxFileSize, cfg.MaxFileSize)
+	}
+	// Classifier filters (include-sources/skip-pom) change which artifacts
+	// discovery yields — resuming with different filters would rescan a
+	// different artifact set, so refuse resume across a mismatch.
+	if s.ConfigSnapshot.IncludeSources != cfg.IncludeSources {
+		return fmt.Errorf("state file IncludeSources (%v) does not match current IncludeSources (%v)", s.ConfigSnapshot.IncludeSources, cfg.IncludeSources)
+	}
+	if s.ConfigSnapshot.SkipPom != cfg.SkipPom {
+		return fmt.Errorf("state file SkipPom (%v) does not match current SkipPom (%v)", s.ConfigSnapshot.SkipPom, cfg.SkipPom)
 	}
 	return nil
 }

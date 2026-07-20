@@ -92,3 +92,36 @@ func TestArtifactFileDetection_NonArtifactExtensions(t *testing.T) {
 	assert.False(t, isArtifactFile("lib-1.0.jar.md5"))
 	assert.False(t, isArtifactFile("lib-1.0.pom.asc"))
 }
+
+func TestIsWantedArtifact_ClassifierFilters(t *testing.T) {
+	tests := []struct {
+		name           string
+		includeSources bool
+		skipPom        bool
+		want           bool
+	}{
+		{"lib-1.0.jar", false, false, true},
+		{"lib-1.0-sources.jar", false, false, false},  // sources 默认跳过
+		{"lib-1.0-sources.jar", true, false, true},  // 显式开启
+		{"lib-1.0-javadoc.jar", false, false, false},
+		{"lib-1.0-tests.jar", false, false, false},
+		{"lib-1.0.pom", false, false, true},          // pom 默认扫
+		{"lib-1.0.pom", false, true, false},          // skip-pom 跳过
+		{"lib-1.0.xml", false, true, false},
+		{"lib-1.0.war", false, false, true},
+		{"readme.txt", false, false, false},          // 非 artifact
+		{"lib-1.0.jar.sha1", false, false, false},   // 非 artifact（.sha1 不在表）
+	}
+	for _, tt := range tests {
+		got := isWantedArtifact(tt.name, tt.includeSources, tt.skipPom)
+		assert.Equal(t, tt.want, got, "name=%s includeSources=%v skipPom=%v", tt.name, tt.includeSources, tt.skipPom)
+	}
+}
+
+func TestIsClassifierJar(t *testing.T) {
+	assert.True(t, isClassifierJar("lib-1.0-sources.jar"))
+	assert.True(t, isClassifierJar("lib-1.0-javadoc.jar"))
+	assert.True(t, isClassifierJar("lib-1.0-tests.jar"))
+	assert.False(t, isClassifierJar("lib-1.0.jar"))
+	assert.False(t, isClassifierJar("lib-1.0.pom"))
+}

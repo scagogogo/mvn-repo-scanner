@@ -460,6 +460,8 @@ func (s *Scanner) discoverStreaming(ctx context.Context, artifactCh chan<- repo.
 	}
 
 	walker := repo.NewCursorWalker(s.pageFetcher, baseURL)
+	// Apply classifier filters (include-sources/skip-pom) to streaming discovery.
+	walker.SetClassifierFilters(s.cfg.IncludeSources, s.cfg.SkipPom)
 	// Record fetch-failed directories so resume can re-visit them instead of
 	// permanently losing the subtree (the walk itself skips them on error).
 	if s.state != nil {

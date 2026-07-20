@@ -177,12 +177,14 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if scanState != nil && cfg.Resume {
 		// Validate config compatibility
 		configSnap := state.ConfigSnapshot{
-			RepoURL:     cfg.RepoURL,
-			GroupFilter: cfg.GroupFilter,
-			RulesLevel:  cfg.RulesLevel,
-			RulesFile:   cfg.RulesFile,
-			RulesMerge:  cfg.RulesMerge,
-			MaxFileSize: cfg.MaxFileSize,
+			RepoURL:        cfg.RepoURL,
+			GroupFilter:    cfg.GroupFilter,
+			RulesLevel:     cfg.RulesLevel,
+			RulesFile:      cfg.RulesFile,
+			RulesMerge:     cfg.RulesMerge,
+			MaxFileSize:    cfg.MaxFileSize,
+			IncludeSources: cfg.IncludeSources,
+			SkipPom:        cfg.SkipPom,
 		}
 		if err := scanState.ValidateConfig(configSnap); err != nil {
 			return fmt.Errorf("config mismatch on resume: %w", err)
@@ -224,6 +226,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		maxConns = 128
 	}
 	browser = browser.WithMaxConnsPerHost(cfg.Timeout, maxConns)
+	browser = browser.WithClassifierFilters(cfg.IncludeSources, cfg.SkipPom)
 	maxBytes, _ := cfg.ParseMaxFileSize()
 	// Download connection pool: auto = max(download-concurrency or concurrency, 64), capped at 128.
 	dlMaxConns := cfg.DownloadConcurrency
@@ -285,12 +288,14 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// Initialize state for new scan (must be before OnResult callback)
 	if scanState == nil {
 		configSnap := state.ConfigSnapshot{
-			RepoURL:     cfg.RepoURL,
-			GroupFilter: cfg.GroupFilter,
-			RulesLevel:  cfg.RulesLevel,
-			RulesFile:   cfg.RulesFile,
-			RulesMerge:  cfg.RulesMerge,
-			MaxFileSize: cfg.MaxFileSize,
+			RepoURL:        cfg.RepoURL,
+			GroupFilter:    cfg.GroupFilter,
+			RulesLevel:     cfg.RulesLevel,
+			RulesFile:      cfg.RulesFile,
+			RulesMerge:     cfg.RulesMerge,
+			MaxFileSize:    cfg.MaxFileSize,
+			IncludeSources: cfg.IncludeSources,
+			SkipPom:        cfg.SkipPom,
 		}
 		scanState = state.NewScanStateWithConfig(scanID, cfg.RepoURL, cfg.GroupFilter, cfg.StateFile, cfg.CheckpointInterval, configSnap)
 		scanState.SetMaxRetries(cfg.Retries)

@@ -62,10 +62,12 @@ func (a Artifact) Path() string {
 
 // Browser traverses a Maven repository's directory structure.
 type Browser struct {
-	client      *http.Client
-	groupFilter string
-	auth        AuthConfig
-	limiter    *rate.Limiter // optional QPS throttle for discovery fetches
+	client         *http.Client
+	groupFilter    string
+	auth           AuthConfig
+	limiter        *rate.Limiter // optional QPS throttle for discovery fetches
+	includeSources bool          // scan -sources/-javadoc/-tests jars (off by default)
+	skipPom        bool          // skip .pom/.xml metadata files
 }
 
 // NewBrowser creates a new repository browser.
@@ -94,6 +96,16 @@ func (b *Browser) WithLimiter(l *rate.Limiter) *Browser {
 // cap, overriding the default 32. Useful when discovery concurrency is raised.
 func (b *Browser) WithMaxConnsPerHost(timeout time.Duration, maxConns int) *Browser {
 	b.client = newHTTPClient(timeout, maxConns)
+	return b
+}
+
+// WithClassifierFilters sets sources/pom discovery filtering.
+// includeSources=true keeps -sources/-javadoc/-tests jars (which contain .java
+// source, the main place real secrets leak on Maven Central).
+// skipPom=true skips .pom/.xml metadata files for faster scans.
+func (b *Browser) WithClassifierFilters(includeSources, skipPom bool) *Browser {
+	b.includeSources = includeSources
+	b.skipPom = skipPom
 	return b
 }
 
@@ -139,7 +151,7 @@ func (b *Browser) walk(ctx context.Context, url string, pathSegments []string, a
 			if err := b.walk(ctx, entry.URL, newSegments, artifacts); err != nil {
 				continue
 			}
-		} else if isArtifactFile(entry.Name) {
+		} else if isWantedArtifact(entry.Name, b.includeSources, b.skipPom) {
 			artifact := b.buildArtifact(pathSegments, entry)
 			if artifact != nil {
 				*artifacts = append(*artifacts, *artifact)

@@ -55,6 +55,12 @@ type CursorWalker struct {
 	fetcher PageFetcher
 	baseURL string
 
+	// includeSources/skipPom mirror Browser's classifier filters so streaming
+	// discovery (the default path) honors the same --include-sources/--skip-pom
+	// flags as batched discovery.
+	includeSources bool
+	skipPom        bool
+
 	// onDirFailed, if set, is invoked when a directory listing cannot be
 	// fetched during a walk. The walk still skips the directory (popping the
 	// frame and continuing with siblings) so a single transient failure does
@@ -75,6 +81,13 @@ func NewCursorWalker(fetcher PageFetcher, baseURL string) *CursorWalker {
 		baseURL: baseURL,
 		cache:   make(map[string]*dirNode),
 	}
+}
+
+// SetClassifierFilters mirrors Browser.WithClassifierFilters so the streaming
+// discovery path honors the same --include-sources/--skip-pom flags.
+func (w *CursorWalker) SetClassifierFilters(includeSources, skipPom bool) {
+	w.includeSources = includeSources
+	w.skipPom = skipPom
 }
 
 // SetOnDirFailed installs a callback invoked when a directory listing fetch
@@ -133,7 +146,7 @@ func (w *CursorWalker) Walk(ctx context.Context, start Cursor, yield func(artifa
 
 		if e.IsDir {
 			cur = append(cur, CursorFrame{DirPath: joinPath(top.DirPath, e.Name), NextIdx: 0})
-		} else if isArtifactFile(e.Name) {
+		} else if isWantedArtifact(e.Name, w.includeSources, w.skipPom) {
 			art := w.buildArtifact(top.DirPath, e)
 			if art != nil {
 				yield(*art)
